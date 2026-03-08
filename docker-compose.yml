@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  ace-content-getter:
+    # Opción 1: Construir desde Dockerfile local (descomenta esta sección)
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    # Opción 2: Usar imagen pre-construida (descomenta si la tienes publicada)
+    # image: tu-usuario/ace-content-getter:latest
+    
+    container_name: ace-content-getter
+    
+    # Puertos
+    ports:
+      - "8080:8080"  # Puerto externo:interno
+    
+    # Variables de entorno
+    environment:
+      # URL del archivo m3u a descargar
+      M3U_URL: "${M3U_URL:-http://ejemplo.com/playlist.m3u}"
+      
+      # Puerto del servidor
+      SERVER_PORT: "8080"
+      
+      # IP original a reemplazar
+      OLD_IP: "${OLD_IP:-127.0.0.1}"
+      
+      # IP nueva
+      NEW_IP: "${NEW_IP:-192.168.1.151}"
+      
+      # Intervalo de actualización en horas
+      UPDATE_INTERVAL: "${UPDATE_INTERVAL:-12}"
+    
+    # Política de reinicio
+    restart: unless-stopped
+    
+    # Recursos límites
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    
+    # Logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Volúmenes (opcional, para persistencia)
+    # volumes:
+    #   - ./logs:/app/logs
+    
+    # Red personalizada
+    networks:
+      - ace-network
+    
+    # Healthcheck
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  ace-network:
+    driver: bridge
