@@ -214,7 +214,7 @@ def generate_m3u_with_streams(base_content, streams):
             if stream.get('group'):
                 extinf += f" group-title=\"{stream['group']}\""
             
-            extinf += f"\n{stream['name']}\n{stream['url']}\n"
+            extinf += f", {stream['name']}\n{stream['url']}\n"
             content += extinf
     
     return content
