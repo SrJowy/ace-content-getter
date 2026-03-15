@@ -61,7 +61,7 @@ print_info() {
 }
 
 # Verificar si docker-compose existe
-if ! command -v docker-compose &> /dev/null && ! command -v docker &> /dev/null; then
+if ! command -v docker compose &> /dev/null && ! command -v docker &> /dev/null; then
     print_error "Docker o Docker Compose no está instalado"
     exit 1
 fi
@@ -70,7 +70,7 @@ fi
 case "${1:-}" in
     up)
         print_info "Iniciando contenedor..."
-        docker-compose up -d
+        docker compose up -d
         print_success "Contenedor iniciado exitosamente"
         echo ""
         echo "Accede a: http://localhost:8080/"
@@ -80,48 +80,48 @@ case "${1:-}" in
     
     down)
         print_info "Deteniendo contenedor..."
-        docker-compose down
+        docker compose down
         print_success "Contenedor detenido"
         ;;
     
     restart)
         print_info "Reiniciando contenedor..."
-        docker-compose restart ace-content-getter
+        docker compose restart ace-content-getter
         print_success "Contenedor reiniciado"
         ;;
     
     logs)
         echo "Mostrando logs en tiempo real (presiona Ctrl+C para salir)..."
-        docker-compose logs -f ace-content-getter
+        docker compose logs -f ace-content-getter
         ;;
     
     status)
         echo "Estado del contenedor:"
-        docker-compose ps
+        docker compose ps
         ;;
     
     build)
         print_info "Compilando imagen..."
-        docker-compose build
+        docker compose build
         print_success "Imagen compilada exitosamente"
         ;;
     
     rebuild)
         print_info "Recompilando imagen sin caché..."
-        docker-compose build --no-cache
+        docker compose build --no-cache
         print_success "Imagen recompilada exitosamente"
         ;;
     
     shell)
         print_info "Abriendo shell dentro del contenedor..."
-        docker-compose exec ace-content-getter /bin/bash
+        docker compose exec ace-content-getter /bin/bash
         ;;
     
     test)
         print_info "Probando conectividad..."
-        if docker-compose exec ace-content-getter curl -s http://localhost:8080/health > /dev/null 2>&1; then
+        if docker compose exec ace-content-getter curl -s http://localhost:8080/health > /dev/null 2>&1; then
             print_success "Servidor respondiendo correctamente"
-            docker-compose exec ace-content-getter curl -s http://localhost:8080/health | jq . 2>/dev/null || echo ""
+            docker compose exec ace-content-getter curl -s http://localhost:8080/health | jq . 2>/dev/null || echo ""
         else
             print_error "El servidor no está respondiendo"
             exit 1
@@ -130,7 +130,7 @@ case "${1:-}" in
     
     clean)
         print_info "Limpiando contenedores y volúmenes..."
-        docker-compose down -v
+        docker compose down -v
         print_success "Limpieza completada"
         ;;
     
