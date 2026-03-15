@@ -14,7 +14,7 @@ services:
     
     # Puertos
     ports:
-      - "8080:8080"  # Puerto externo:interno
+      - "8082:8080"  # Puerto externo:interno
     
     # Variables de entorno
     environment:
@@ -22,7 +22,7 @@ services:
       M3U_URL: "${M3U_URL:-http://ejemplo.com/playlist.m3u}"
       
       # Puerto del servidor
-      SERVER_PORT: "8080"
+      SERVER_PORT: "8082"
       
       # IP original a reemplazar
       OLD_IP: "${OLD_IP:-127.0.0.1}"
@@ -66,7 +66,7 @@ services:
     
     # Healthcheck
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
