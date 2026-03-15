@@ -79,18 +79,22 @@ class StreamManager:
     def get_streams(self):
         """Obtiene todos los streams personalizados"""
         with self.lock:
-            try:
-                with open(self.file_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"Error al leer streams: {e}")
-                return []
+            return self._get_streams_unlocked()
+    
+    def _get_streams_unlocked(self):
+        """Obtiene streams sin usar lock (para uso interno)"""
+        try:
+            with open(self.file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error al leer streams: {e}")
+            return []
     
     def add_stream(self, name, url, logo='', group=''):
         """Añade un nuevo stream personalizado"""
         with self.lock:
             try:
-                streams = self.get_streams()
+                streams = self._get_streams_unlocked()
                 
                 # Verificar que no sea duplicada
                 if any(s['url'] == url for s in streams):
@@ -118,7 +122,7 @@ class StreamManager:
         """Actualiza un stream existente"""
         with self.lock:
             try:
-                streams = self.get_streams()
+                streams = self._get_streams_unlocked()
                 
                 # Buscar el stream
                 stream = next((s for s in streams if s['id'] == stream_id), None)
@@ -145,7 +149,7 @@ class StreamManager:
         """Elimina un stream personalizado"""
         with self.lock:
             try:
-                streams = self.get_streams()
+                streams = self._get_streams_unlocked()
                 stream = next((s for s in streams if s['id'] == stream_id), None)
                 
                 if not stream:
