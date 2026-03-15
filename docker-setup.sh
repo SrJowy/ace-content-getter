@@ -22,7 +22,7 @@ if ! command -v docker &> /dev/null; then
     echo -e "${RED}✗ ERROR: Docker no está instalado${NC}"
     echo ""
     echo "Instálalo con:"
-    echo "  Ubuntu/Debian: sudo apt-get install docker.io docker-compose"
+    echo "  Ubuntu/Debian: sudo apt-get install docker.io docker compose"
     echo "  Mac: brew install --cask docker"
     echo "  Otros: https://docs.docker.com/get-docker/"
     exit 1
@@ -33,15 +33,15 @@ docker --version
 
 echo ""
 
-# Verificar si docker-compose está instalado
-if ! command -v docker-compose &> /dev/null; then
+# Verificar si docker compose está instalado
+if ! command -v docker compose &> /dev/null; then
     if ! docker compose version &> /dev/null; then
         echo -e "${RED}✗ ERROR: Docker Compose no está disponible${NC}"
         echo ""
         echo "Instálalo con:"
-        echo "  sudo apt-get install docker-compose"
+        echo "  sudo apt-get install docker compose"
         echo "  o"
-        echo "  pip install docker-compose"
+        echo "  pip install docker compose"
         exit 1
     else
         echo -e "${GREEN}✓ Docker Compose v2 detectado${NC}"
@@ -49,7 +49,7 @@ if ! command -v docker-compose &> /dev/null; then
     fi
 else
     echo -e "${GREEN}✓ Docker Compose detectado${NC}"
-    docker-compose --version
+    docker compose --version
 fi
 
 echo ""
@@ -108,7 +108,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "2. Inicia el contenedor con uno de estos comandos:"
     echo ""
-    echo "   docker-compose up -d"
+    echo "   docker compose up -d"
     echo "   o"
     echo "   ./docker-docker.sh up"
     echo ""
@@ -116,7 +116,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "4. Ver logs con:"
     echo ""
-    echo "   docker-compose logs -f"
+    echo "   docker compose logs -f"
     echo "   o"
     echo "   ./docker-docker.sh logs"
     echo ""
