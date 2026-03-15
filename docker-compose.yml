@@ -32,9 +32,16 @@ services:
       
       # Intervalo de actualización en horas
       UPDATE_INTERVAL: "${UPDATE_INTERVAL:-12}"
+      
+      # Directorio de datos (para persistencia de URLs personalizadas)
+      DATA_DIR: "/app/data"
     
     # Política de reinicio
     restart: unless-stopped
+    
+    # Volúmenes para persistencia de datos
+    volumes:
+      - ace_data:/app/data
     
     # Recursos límites
     deploy:
@@ -53,10 +60,6 @@ services:
         max-size: "10m"
         max-file: "3"
     
-    # Volúmenes (opcional, para persistencia)
-    # volumes:
-    #   - ./logs:/app/logs
-    
     # Red personalizada
     networks:
       - ace-network
@@ -72,3 +75,7 @@ services:
 networks:
   ace-network:
     driver: bridge
+
+volumes:
+  ace_data:
+    driver: local

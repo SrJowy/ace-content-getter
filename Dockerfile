@@ -19,6 +19,9 @@ WORKDIR /app
 # Crear usuario no-root para seguridad
 RUN useradd -m -u 1000 appuser
 
+# Crear directorio de datos con permisos
+RUN mkdir -p /app/data && chown -R appuser:appuser /app/data && chmod 755 /app/data
+
 # Copiar venv de la etapa builder
 COPY --from=builder /opt/venv /opt/venv
 

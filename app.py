@@ -61,7 +61,8 @@ cache = M3UCache()
 scheduler = BackgroundScheduler()
 
 # Gestión de URLs personalizadas
-CUSTOM_URLS_FILE = 'custom_urls.json'
+DATA_DIR = os.getenv('DATA_DIR', '/app/data')
+CUSTOM_URLS_FILE = os.path.join(DATA_DIR, 'custom_urls.json')
 
 class URLManager:
     """Clase para gestionar las URLs personalizadas"""
@@ -127,6 +128,18 @@ class URLManager:
         except Exception as e:
             logger.error(f"Error al guardar URLs: {e}")
             raise
+
+def init_data_directory():
+    """Crea el directorio de datos si no existe"""
+    data_dir = os.path.dirname(CUSTOM_URLS_FILE)
+    if data_dir and not os.path.exists(data_dir):
+        try:
+            os.makedirs(data_dir, mode=0o777, exist_ok=True)
+            logger.info(f"Directorio de datos creado: {data_dir}")
+        except Exception as e:
+            logger.error(f"Error al crear directorio de datos: {e}")
+            # Intentar escribir en el directorio actual como fallback
+            logger.warning("Usando directorio actual como fallback")
 
 url_manager = URLManager()
 
@@ -670,7 +683,11 @@ if __name__ == '__main__':
     logger.info(f"IP original: {old_ip}")
     logger.info(f"IP nueva: {new_ip}")
     logger.info(f"Intervalo de actualización: {update_interval} horas")
+    logger.info(f"Directorio de datos: {DATA_DIR}")
     logger.info("="*60)
+    
+    # Inicializar directorio de datos
+    init_data_directory()
     
     # Descargar el contenido inicial
     logger.info("Descargando contenido inicial...")
