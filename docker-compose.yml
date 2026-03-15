@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   ace-content-getter:
     # Opción 1: Construir desde Dockerfile local (descomenta esta sección)
