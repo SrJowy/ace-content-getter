@@ -4,13 +4,14 @@ con caché automático y descarga cada 12 horas
 """
 
 import requests
-from flask import Flask, send_file, jsonify
+from flask import Flask, send_file, jsonify, request
 from io import BytesIO
 import logging
 import os
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 import threading
+import json
 
 # Configuración
 m3u_url = os.getenv('M3U_URL', 'http://ejemplo.com/playlist.m3u')
@@ -59,31 +60,143 @@ class M3UCache:
 cache = M3UCache()
 scheduler = BackgroundScheduler()
 
+# Gestión de URLs personalizadas
+CUSTOM_URLS_FILE = 'custom_urls.json'
+
+class URLManager:
+    """Clase para gestionar las URLs personalizadas"""
+    def __init__(self, file_path=CUSTOM_URLS_FILE):
+        self.file_path = file_path
+        self.lock = threading.Lock()
+        self._ensure_file_exists()
+    
+    def _ensure_file_exists(self):
+        """Crea el archivo si no existe"""
+        if not os.path.exists(self.file_path):
+            self._save_urls([])
+    
+    def get_urls(self):
+        """Obtiene todas las URLs personalizadas"""
+        with self.lock:
+            try:
+                with open(self.file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Error al leer URLs personalizadas: {e}")
+                return []
+    
+    def add_url(self, url, name=''):
+        """Añade una nueva URL personalizada"""
+        with self.lock:
+            try:
+                urls = self.get_urls()
+                # Verificar que no sea duplicada
+                if any(u['url'] == url for u in urls):
+                    return False, "URL ya existe"
+                
+                urls.append({
+                    'url': url,
+                    'name': name or url,
+                    'added_at': datetime.now().isoformat()
+                })
+                self._save_urls(urls)
+                logger.info(f"URL personalizada agregada: {url}")
+                return True, "URL agregada exitosamente"
+            except Exception as e:
+                logger.error(f"Error al agregar URL: {e}")
+                return False, str(e)
+    
+    def remove_url(self, url):
+        """Elimina una URL personalizada"""
+        with self.lock:
+            try:
+                urls = self.get_urls()
+                urls = [u for u in urls if u['url'] != url]
+                self._save_urls(urls)
+                logger.info(f"URL personalizada eliminada: {url}")
+                return True, "URL eliminada exitosamente"
+            except Exception as e:
+                logger.error(f"Error al eliminar URL: {e}")
+                return False, str(e)
+    
+    def _save_urls(self, urls):
+        """Guarda las URLs en el archivo"""
+        try:
+            with open(self.file_path, 'w', encoding='utf-8') as f:
+                json.dump(urls, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Error al guardar URLs: {e}")
+            raise
+
+url_manager = URLManager()
+
 
 def download_and_modify_m3u():
-    """Descarga el archivo m3u y reemplaza las IPs"""
+    """Descarga los archivos m3u (principal + URLs personalizadas) y reemplaza las IPs"""
     try:
-        logger.info(f"Descargando m3u desde: {m3u_url}")
-        response = requests.get(m3u_url, timeout=10)
-        response.raise_for_status()
+        combined_content = ""
+        downloaded_urls = []
+        failed_urls = []
         
-        # Obtener contenido
-        content = response.text
+        # Descargar URL principal
+        try:
+            logger.info(f"Descargando m3u principal desde: {m3u_url}")
+            response = requests.get(m3u_url, timeout=10)
+            response.raise_for_status()
+            combined_content = response.text
+            downloaded_urls.append(m3u_url)
+            logger.info(f"URL principal descargada ({len(response.text)} bytes)")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error al descargar URL principal: {e}")
+            failed_urls.append(f"{m3u_url} - {str(e)}")
+        
+        # Descargar URLs personalizadas
+        custom_urls = url_manager.get_urls()
+        for url_obj in custom_urls:
+            url = url_obj['url']
+            try:
+                logger.info(f"Descargando URL personalizada: {url}")
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                
+                # Agregar contenido personalizado (sin el header #EXTM3U si ya existe)
+                content = response.text
+                if combined_content and not combined_content.endswith('\n'):
+                    combined_content += '\n'
+                
+                # Evitar múltiples headers
+                if not content.startswith('#EXTM3U'):
+                    combined_content += content
+                else:
+                    # Saltar el header si el contenido principal ya lo tiene
+                    lines = content.split('\n')
+                    combined_content += '\n'.join(lines[1:]) if len(lines) > 1 else ''
+                
+                downloaded_urls.append(url)
+                logger.info(f"URL personalizada descargada ({len(content)} bytes): {url}")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error al descargar URL personalizada {url}: {e}")
+                failed_urls.append(f"{url} - {str(e)}")
+        
+        if not combined_content:
+            raise Exception("No se pudo descargar contenido de ninguna fuente")
         
         # Realizar el reemplazo
-        modified_content = content.replace(old_ip, new_ip)
+        modified_content = combined_content.replace(old_ip, new_ip)
         
         logger.info(f"Reemplazo completado: {old_ip} -> {new_ip}")
-        logger.info(f"Tamaño original: {len(content)} bytes")
+        logger.info(f"URLs descargadas exitosamente: {len(downloaded_urls)}")
+        if failed_urls:
+            logger.warning(f"URLs que fallaron: {len(failed_urls)}")
+            for failed in failed_urls:
+                logger.warning(f"  - {failed}")
+        logger.info(f"Tamaño original: {len(combined_content)} bytes")
         logger.info(f"Tamaño modificado: {len(modified_content)} bytes")
         
         return modified_content
         
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error al descargar el archivo m3u: {e}")
-        raise
     except Exception as e:
-        logger.error(f"Error al procesar el archivo: {e}")
+        logger.error(f"Error al procesar los archivos: {e}")
         raise
 
 def update_cache():
@@ -161,11 +274,84 @@ def status():
     }
     return jsonify(status_info), 200
 
+@app.route('/api/custom-urls', methods=['GET'])
+def get_custom_urls():
+    """Obtiene la lista de URLs personalizadas"""
+    try:
+        urls = url_manager.get_urls()
+        return jsonify({'urls': urls, 'count': len(urls)}), 200
+    except Exception as e:
+        logger.error(f"Error al obtener URLs: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/custom-urls', methods=['POST'])
+def add_custom_url():
+    """Añade una nueva URL personalizada"""
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        name = data.get('name', '').strip()
+        
+        if not url:
+            return jsonify({'error': 'URL es requerida'}), 400
+        
+        # Validar que sea una URL válida
+        if not url.startswith(('http://', 'https://')):
+            return jsonify({'error': 'URL debe comenzar con http:// o https://'}), 400
+        
+        success, message = url_manager.add_url(url, name)
+        
+        if success:
+            # Forzar actualización del caché
+            update_cache()
+            return jsonify({'message': message, 'url': url}), 201
+        else:
+            return jsonify({'error': message}), 409
+    except Exception as e:
+        logger.error(f"Error al agregar URL: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/custom-urls/<path:url>', methods=['DELETE'])
+def delete_custom_url(url):
+    """Elimina una URL personalizada"""
+    try:
+        url = url.strip()
+        success, message = url_manager.remove_url(url)
+        
+        if success:
+            # Forzar actualización del caché
+            update_cache()
+            return jsonify({'message': message}), 200
+        else:
+            return jsonify({'error': message}), 404
+    except Exception as e:
+        logger.error(f"Error al eliminar URL: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/')
 def index():
     """Página de inicio"""
     cache_status = "✓ Disponible" if cache.is_valid() else "✗ No disponible"
     last_update = cache.last_update.strftime('%Y-%m-%d %H:%M:%S') if cache.last_update else "Nunca"
+    custom_urls = url_manager.get_urls()
+    
+    urls_html = ""
+    if custom_urls:
+        urls_html = "<ul id='urls_list'>"
+        for idx, url_obj in enumerate(custom_urls):
+            urls_html += f"""
+            <li class="url-item">
+                <div class="url-info">
+                    <strong>{url_obj['name']}</strong>
+                    <br><small>{url_obj['url']}</small>
+                    <br><small>Agregado: {url_obj['added_at'][:10]}</small>
+                </div>
+                <button onclick="deleteURL('{url_obj['url']}', this)" class="btn-delete">Eliminar</button>
+            </li>
+            """
+        urls_html += "</ul>"
+    else:
+        urls_html = "<p style='color: #999;'>No hay URLs personalizadas agregadas</p>"
     
     return f"""
     <html>
@@ -183,6 +369,11 @@ def index():
                 color: #333;
                 border-bottom: 3px solid #4CAF50;
                 padding-bottom: 10px;
+            }}
+            h2 {{
+                color: #555;
+                margin-top: 25px;
+                font-size: 1.3em;
             }}
             .section {{
                 background: white;
@@ -224,6 +415,93 @@ def index():
             a:hover {{
                 text-decoration: underline;
             }}
+            .form-group {{
+                margin-bottom: 15px;
+            }}
+            label {{
+                display: block;
+                margin-bottom: 5px;
+                font-weight: bold;
+                color: #333;
+            }}
+            input[type="text"],
+            input[type="url"] {{
+                width: 100%;
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 14px;
+                box-sizing: border-box;
+            }}
+            input[type="text"]:focus,
+            input[type="url"]:focus {{
+                outline: none;
+                border-color: #4CAF50;
+                box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
+            }}
+            button {{
+                background-color: #4CAF50;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: bold;
+            }}
+            button:hover {{
+                background-color: #45a049;
+            }}
+            .btn-delete {{
+                background-color: #f44336;
+                padding: 6px 12px;
+                font-size: 12px;
+            }}
+            .btn-delete:hover {{
+                background-color: #da190b;
+            }}
+            .url-item {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px !important;
+                background-color: #f9f9f9;
+                border-radius: 4px;
+                margin-bottom: 10px;
+                border: 1px solid #eee;
+            }}
+            .url-info {{
+                flex: 1;
+            }}
+            .url-info small {{
+                color: #666;
+            }}
+            .loading {{
+                display: none;
+                color: #4CAF50;
+                font-weight: bold;
+            }}
+            .message {{
+                padding: 10px;
+                margin: 10px 0;
+                border-radius: 4px;
+                display: none;
+            }}
+            .message.success {{
+                background-color: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+                display: block;
+            }}
+            .message.error {{
+                background-color: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
+                display: block;
+            }}
+            #message {{
+                display: none;
+            }}
         </style>
     </head>
     <body>
@@ -240,7 +518,7 @@ def index():
         </div>
         
         <div class="section">
-            <h2>⚙️ Configuración actual:</h2>
+            <h2>⚙️ Configuración principal:</h2>
             <ul>
                 <li><strong>URL del m3u:</strong> <code>{m3u_url}</code></li>
                 <li><strong>IP original:</strong> <code>{old_ip}</code></li>
@@ -250,21 +528,121 @@ def index():
         </div>
         
         <div class="section">
+            <h2>➕ Agregar URL Personalizada</h2>
+            <div id="message" class="message"></div>
+            <div class="form-group">
+                <label for="urlInput">URL del archivo M3U:</label>
+                <input type="url" id="urlInput" placeholder="https://ejemplo.com/playlist.m3u" />
+            </div>
+            <div class="form-group">
+                <label for="nameInput">Nombre (opcional):</label>
+                <input type="text" id="nameInput" placeholder="Mi lista personal" />
+            </div>
+            <button onclick="addURL()">Agregar URL</button>
+            <span id="loading" class="loading">Agregando URL y actualizando caché...</span>
+        </div>
+        
+        <div class="section">
+            <h2>📋 URLs Personalizadas ({len(custom_urls)})</h2>
+            {urls_html}
+        </div>
+        
+        <div class="section">
             <h2>🔗 Endpoints disponibles:</h2>
             <ul>
                 <li><a href="/stream.m3u">/stream.m3u</a> - Descargar el archivo m3u modificado</li>
                 <li><a href="/status">/status</a> - JSON con estado detallado de la aplicación</li>
                 <li><a href="/health">/health</a> - Verificar disponibilidad del servidor</li>
+                <li><a href="/api/custom-urls">/api/custom-urls</a> - Lista de URLs personalizadas (GET/POST)</li>
             </ul>
         </div>
         
         <div class="section">
             <h2>💡 Cómo usar:</h2>
-            <p><strong>En VLC:</strong></p>
-            <code>http://localhost:{server_port}/stream.m3u</code>
-            <p><strong>En Kodi y otros reproductores:</strong></p>
+            <p><strong>En VLC, Kodi u otros reproductores:</strong></p>
             <code>http://IP_DEL_SERVIDOR:{server_port}/stream.m3u</code>
         </div>
+        
+        <script>
+            async function addURL() {{
+                const url = document.getElementById('urlInput').value.trim();
+                const name = document.getElementById('nameInput').value.trim();
+                const messageDiv = document.getElementById('message');
+                const loading = document.getElementById('loading');
+                
+                messageDiv.style.display = 'none';
+                
+                if (!url) {{
+                    messageDiv.textContent = 'Por favor ingresa una URL';
+                    messageDiv.className = 'message error';
+                    messageDiv.style.display = 'block';
+                    return;
+                }}
+                
+                loading.style.display = 'inline';
+                
+                try {{
+                    const response = await fetch('/api/custom-urls', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json',
+                        }},
+                        body: JSON.stringify({{url: url, name: name}})
+                    }});
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {{
+                        messageDiv.textContent = '✓ URL agregada exitosamente. Caché actualizado.';
+                        messageDiv.className = 'message success';
+                        messageDiv.style.display = 'block';
+                        document.getElementById('urlInput').value = '';
+                        document.getElementById('nameInput').value = '';
+                        setTimeout(() => location.reload(), 2000);
+                    }} else {{
+                        messageDiv.textContent = '✗ Error: ' + data.error;
+                        messageDiv.className = 'message error';
+                        messageDiv.style.display = 'block';
+                    }}
+                }} catch (error) {{
+                    messageDiv.textContent = '✗ Error de red: ' + error.message;
+                    messageDiv.className = 'message error';
+                    messageDiv.style.display = 'block';
+                }} finally {{
+                    loading.style.display = 'none';
+                }}
+            }}
+            
+            async function deleteURL(url, button) {{
+                if (!confirm('¿Estás seguro de que deseas eliminar esta URL?')) {{
+                    return;
+                }}
+                
+                try {{
+                    const response = await fetch('/api/custom-urls/' + encodeURIComponent(url), {{
+                        method: 'DELETE'
+                    }});
+                    
+                    if (response.ok) {{
+                        alert('URL eliminada. Recargando página...');
+                        location.reload();
+                    }} else {{
+                        const data = await response.json();
+                        alert('Error: ' + data.error);
+                    }}
+                }} catch (error) {{
+                    alert('Error de red: ' + error.message);
+                }}
+            }}
+            
+            // Auto-submit al presionar Enter
+            document.getElementById('nameInput').addEventListener('keypress', function(e) {{
+                if (e.key === 'Enter') addURL();
+            }});
+            document.getElementById('urlInput').addEventListener('keypress', function(e) {{
+                if (e.key === 'Enter') addURL();
+            }});
+        </script>
     </body>
     </html>
     """
