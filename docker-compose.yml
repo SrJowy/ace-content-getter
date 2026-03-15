@@ -22,7 +22,7 @@ services:
       M3U_URL: "${M3U_URL:-http://ejemplo.com/playlist.m3u}"
       
       # Puerto del servidor
-      SERVER_PORT: "8082"
+      SERVER_PORT: "8080"
       
       # IP original a reemplazar
       OLD_IP: "${OLD_IP:-127.0.0.1}"
