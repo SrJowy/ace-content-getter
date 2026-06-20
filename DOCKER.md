@@ -422,7 +422,7 @@ docker system prune -a
 
 ```bash
 # .env
-M3U_URL=https://ipfs.io/ipns/k2k4r8oqlcjxsritt5mczkcn4mmvcmymbqw7113fz2flkrerfwfps004/data/listas/lista_iptv.m3u
+M3U_URL=https://example/lista_iptv.m3u
 OLD_IP=127.0.0.1
 NEW_IP=192.168.1.151
 UPDATE_INTERVAL=12

@@ -3,3 +3,4 @@ requests==2.31.0
 Werkzeug==2.3.7
 APScheduler==3.10.4
 setuptools==79.0.1
+python-dotenv==1.0.0

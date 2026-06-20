@@ -59,7 +59,7 @@ if [ ! -f ".env" ]; then
     echo -e "${BLUE}Creando archivo .env...${NC}"
     cat > .env << 'EOF'
 # URL del archivo m3u a descargar
-M3U_URL=https://ipfs.io/ipns/k2k4r8oqlcjxsritt5mczkcn4mmvcmymbqw7113fz2flkrerfwfps004/data/listas/lista_iptv.m3u
+M3U_URL=https://k2k4r8lm8tkmuxbc8lkmq1in3v0oya1p6pe9o5bu0hu30br5ko08k2gb.ipns.dweb.link/data/listas/lista_iptv.m3u
 
 # IP original a reemplazar
 OLD_IP=127.0.0.1
