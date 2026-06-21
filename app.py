@@ -12,6 +12,7 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 import threading
 import json
+from parser import scrape_acestream_links, remove_duplicates, generate_m3u_content
 
 # Configuración
 m3u_url = os.getenv('M3U_URL', 'http://ejemplo.com/playlist.m3u')
@@ -183,7 +184,84 @@ def init_data_directory():
             logger.error(f"Error al crear directorio de datos: {e}")
             logger.warning("Usando directorio actual como fallback")
 
+# Configuración de origen M3U
+CONFIG_FILE = os.path.join(DATA_DIR, 'config.json')
+PARSER_UPDATE_INTERVAL = int(os.getenv('PARSER_UPDATE_INTERVAL', 6))  # Horas para modo parser
+
+class ConfigManager:
+    """Clase para gestionar la configuración de la aplicación (modo de origen M3U)"""
+    def __init__(self, file_path=CONFIG_FILE):
+        self.file_path = file_path
+        self.lock = threading.Lock()
+        self._ensure_file_exists()
+    
+    def _ensure_file_exists(self):
+        """Crea el archivo de configuración si no existe"""
+        if not os.path.exists(self.file_path):
+            default_config = {
+                'source': 'online',  # 'online' o 'parser'
+                'last_parser_run': None,
+                'created_at': datetime.now().isoformat()
+            }
+            self._save_config(default_config)
+    
+    def _get_config_unlocked(self):
+        """Obtiene la configuración sin usar lock (para uso interno)"""
+        try:
+            with open(self.file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error al leer configuración: {e}")
+            return {'source': 'online'}
+    
+    def get_config(self):
+        """Obtiene la configuración actual"""
+        with self.lock:
+            return self._get_config_unlocked()
+    
+    def get_source(self):
+        """Obtiene el modo de origen actual"""
+        config = self.get_config()
+        return config.get('source', 'online')
+    
+    def set_source(self, source):
+        """Establece el modo de origen ('online' o 'parser')"""
+        if source not in ('online', 'parser'):
+            raise ValueError("source debe ser 'online' o 'parser'")
+        
+        with self.lock:
+            try:
+                config = self._get_config_unlocked()
+                config['source'] = source
+                config['updated_at'] = datetime.now().isoformat()
+                self._save_config(config)
+                logger.info(f"Configuración de origen actualizada a: {source}")
+                return True, "Configuración actualizada"
+            except Exception as e:
+                logger.error(f"Error al actualizar configuración: {e}")
+                return False, str(e)
+    
+    def update_last_parser_run(self):
+        """Actualiza la marca de tiempo de última ejecución del parser"""
+        with self.lock:
+            try:
+                config = self._get_config_unlocked()
+                config['last_parser_run'] = datetime.now().isoformat()
+                self._save_config(config)
+            except Exception as e:
+                logger.error(f"Error al actualizar timestamp de parser: {e}")
+    
+    def _save_config(self, config):
+        """Guarda la configuración en el archivo"""
+        try:
+            with open(self.file_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Error al guardar configuración: {e}")
+            raise
+
 stream_manager = StreamManager()
+config_manager = ConfigManager()
 
 
 def generate_m3u_with_streams(base_content, streams):
@@ -220,33 +298,77 @@ def generate_m3u_with_streams(base_content, streams):
     return content
 
 
+def fetch_from_parser():
+    """Obtiene contenido M3U ejecutando el parser local"""
+    try:
+        logger.info("Ejecutando parser local para obtener streams...")
+        
+        # URL de scraping (misma que usa parser.py)
+        scrape_url = 'https://ciriaco.netlify.app/'
+        
+        # Scrape, remove duplicates, generate content
+        links = scrape_acestream_links(scrape_url)
+        if not links:
+            logger.warning("El parser no encontró streams")
+            return None
+        
+        unique_links = remove_duplicates(links)
+        duplicates_removed = len(links) - len(unique_links)
+        
+        if duplicates_removed > 0:
+            logger.info(f"Se removieron {duplicates_removed} enlaces duplicados")
+        
+        # Generar contenido M3U
+        content = generate_m3u_content(unique_links)
+        
+        if content:
+            logger.info(f"Parser completado: {len(unique_links)} streams únicos")
+            config_manager.update_last_parser_run()
+            return content
+        else:
+            logger.error("El parser no generó contenido M3U válido")
+            return None
+    
+    except Exception as e:
+        logger.error(f"Error ejecutando parser: {e}")
+        return None
+
+
 def download_and_modify_m3u():
-    """Descarga el archivo m3u principal y lo combina con streams personalizados"""
+    """Descarga el archivo m3u principal (online u parser) y lo combina con streams personalizados"""
     try:
         combined_content = ""
+        source = config_manager.get_source()
         
-        # Descargar URL principal
-        try:
-            logger.info(f"Descargando m3u principal desde: {m3u_url}")
-            response = requests.get(m3u_url, timeout=10)
-            response.raise_for_status()
-            combined_content = response.text
-            logger.info(f"URL principal descargada ({len(response.text)} bytes)")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error al descargar URL principal: {e}")
-            logger.warning("Iniciando con contenido vacío")
-            combined_content = "#EXTM3U\n"
+        # Obtener contenido según la fuente configurada
+        if source == 'parser':
+            logger.info("[PARSER MODE] Obteniendo contenido desde parser local...")
+            combined_content = fetch_from_parser()
+            if not combined_content:
+                logger.error("Parser falló, usando fallback a caché anterior")
+                return None
+        else:  # online (default)
+            logger.info(f"[ONLINE MODE] Descargando m3u principal desde: {m3u_url}")
+            try:
+                response = requests.get(m3u_url, timeout=10)
+                response.raise_for_status()
+                combined_content = response.text
+                logger.info(f"URL principal descargada ({len(response.text)} bytes)")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error al descargar URL principal: {e}")
+                logger.warning("Descarga falló, usando fallback a caché anterior")
+                return None
         
         # Obtener streams personalizados
         streams = stream_manager.get_streams()
         
-        # Generar el M3U combinado
+        # Generar el M3U combinado con streams personalizados
         combined_content = generate_m3u_with_streams(combined_content, streams)
         
         if not combined_content:
             raise Exception("No se pudo generar contenido M3U")
         
-        # Realizar el reemplazo
+        # Realizar el reemplazo de IP
         modified_content = combined_content.replace(old_ip, new_ip)
         
         logger.info(f"Reemplazo completado: {old_ip} -> {new_ip}")
@@ -258,7 +380,7 @@ def download_and_modify_m3u():
         
     except Exception as e:
         logger.error(f"Error al procesar los archivos: {e}")
-        raise
+        return None
 
 def update_cache():
     """Actualiza el caché descargando el archivo m3u más reciente"""
@@ -268,10 +390,19 @@ def update_cache():
     
     cache.update_in_progress = True
     try:
-        logger.info(f"[ACTUALIZACIÓN PROGRAMADA] Descargando archivo m3u (cada {update_interval}h)")
+        source = config_manager.get_source()
+        interval = PARSER_UPDATE_INTERVAL if source == 'parser' else update_interval
+        logger.info(f"[ACTUALIZACIÓN PROGRAMADA] Obteniendo contenido en modo {source.upper()} (cada {interval}h)")
+        
         modified_content = download_and_modify_m3u()
-        cache.set(modified_content)
-        logger.info("[ACTUALIZACIÓN PROGRAMADA] Caché actualizado exitosamente")
+        
+        if modified_content:
+            cache.set(modified_content)
+            logger.info("[ACTUALIZACIÓN PROGRAMADA] Caché actualizado exitosamente")
+        else:
+            error_msg = "Falló obtener contenido M3U de ambas fuentes"
+            logger.error(error_msg)
+            cache.set_error(error_msg)
     except Exception as e:
         error_msg = f"Error al actualizar caché: {str(e)}"
         logger.error(error_msg)
@@ -425,12 +556,64 @@ def delete_stream_api(stream_id):
         logger.error(f"Error al eliminar stream: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/config/source', methods=['POST'])
+def set_source_config():
+    """Cambia la fuente de M3U (online u parser)"""
+    try:
+        data = request.get_json()
+        source = data.get('source', '').strip().lower()
+        
+        if not source:
+            return jsonify({'error': 'source es requerido'}), 400
+        
+        if source not in ('online', 'parser'):
+            return jsonify({'error': 'source debe ser "online" o "parser"'}), 400
+        
+        # Cambiar configuración
+        success, message = config_manager.set_source(source)
+        
+        if success:
+            # Reconfigura el scheduler con el nuevo intervalo
+            reconfigure_scheduler(source)
+            
+            # Forzar actualización inmediata del caché
+            update_cache()
+            
+            config = config_manager.get_config()
+            return jsonify({
+                'message': message,
+                'source': source,
+                'config': config
+            }), 200
+        else:
+            return jsonify({'error': message}), 500
+    except Exception as e:
+        logger.error(f"Error al cambiar fuente: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/')
 def index():
     """Página de inicio"""
     cache_status = "✓ Disponible" if cache.is_valid() else "✗ No disponible"
     last_update = cache.last_update.strftime('%Y-%m-%d %H:%M:%S') if cache.last_update else "Nunca"
     streams = stream_manager.get_streams()
+    
+    # Información del modo de origen
+    current_source = config_manager.get_source()
+    source_label_online = "Online (URL Remota)" if current_source == 'online' else "Online (URL Remota)"
+    source_label_parser = "Parser Local (Acestream)" if current_source == 'parser' else "Parser Local (Acestream)"
+    online_checked = 'checked="checked"' if current_source == 'online' else ""
+    parser_checked = 'checked="checked"' if current_source == 'parser' else ""
+    current_interval = update_interval if current_source == 'online' else PARSER_UPDATE_INTERVAL
+    config = config_manager.get_config()
+    last_parser_run = config.get('last_parser_run')
+    if last_parser_run:
+        try:
+            last_parser_run = datetime.fromisoformat(last_parser_run).strftime('%Y-%m-%d %H:%M:%S')
+        except:
+            last_parser_run = "Error al parsear"
+    else:
+        last_parser_run = "Nunca"
     
     streams_html = ""
     if streams:
@@ -698,7 +881,50 @@ def index():
             .required {{
                 color: #dc3545;
             }}
+            .source-selector {{
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                margin: 15px 0;
+            }}
+            .source-option {{
+                position: relative;
+            }}
+            .source-option input[type="radio"] {{
+                display: none;
+            }}
+            .source-option label {{
+                display: block;
+                padding: 16px;
+                border: 2px solid #ddd;
+                border-radius: 6px;
+                background: #f9f9f9;
+                cursor: pointer;
+                transition: all 0.3s;
+                text-align: center;
+                margin: 0;
+            }}
+            .source-option input[type="radio"]:checked + label {{
+                border-color: #667eea;
+                background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+                font-weight: 600;
+                color: #667eea;
+            }}
+            .source-option label:hover {{
+                border-color: #667eea;
+                background: rgba(102, 126, 234, 0.05);
+            }}
+            .source-info {{
+                font-size: 12px;
+                color: #666;
+                margin-top: 4px;
+                text-align: center;
+            }}
             @media (max-width: 768px) {{
+                .source-selector {{
+                    grid-template-columns: 1fr;
+                }}
+
                 .form-row {{
                     grid-template-columns: 1fr;
                 }}
@@ -750,6 +976,37 @@ def index():
                     <code>{old_ip}</code> → <code>{new_ip}</code>
                 </li>
             </ul>
+        </div>
+        
+        <div class="section">
+            <h2>🔄 Configuración de Origen M3U</h2>
+            <p style="margin-bottom: 15px; color: #666;">Elige la fuente de origen para obtener la lista M3U:</p>
+            
+            <div class="source-selector">
+                <div class="source-option">
+                    <input type="radio" id="sourceOnline" name="source" value="online" onchange="changeSource('online')" {online_checked}>
+                    <label for="sourceOnline">
+                        🌐 Online<br>
+                        <div class="source-info">Descarga desde URL remota</div>
+                    </label>
+                </div>
+                <div class="source-option">
+                    <input type="radio" id="sourceParser" name="source" value="parser" onchange="changeSource('parser')" {parser_checked}>
+                    <label for="sourceParser">
+                        📊 Parser Local<br>
+                        <div class="source-info">Ejecuta script parser.py</div>
+                    </label>
+                </div>
+            </div>
+            
+            <div style="background: #f0f0f0; padding: 12px; border-radius: 6px; font-size: 14px; margin-top: 15px;">
+                <p><strong>Modo actual:</strong> <span id="currentSource" style="color: #667eea; font-weight: bold;">{current_source.upper()}</span></p>
+                <p><strong>Intervalo de actualización:</strong> <span id="updateInterval" style="color: #667eea; font-weight: bold;">{current_interval} horas</span></p>
+                {f'<p><strong>Última ejecución del parser:</strong> {last_parser_run}</p>' if current_source == 'parser' else ''}
+            </div>
+            
+            <button onclick="forceUpdate()" style="margin-top: 15px; width: 100%;">🔄 Actualizar ahora</button>
+            <span id="updateLoading" class="loading">Actualizando contenido...</span>
         </div>
         
         <div class="section">
@@ -910,6 +1167,70 @@ def index():
                 // TODO: Implementar modal de edición
             }}
             
+            async function changeSource(newSource) {{
+                const loading = document.getElementById('updateLoading');
+                const currentSourceSpan = document.getElementById('currentSource');
+                const updateIntervalSpan = document.getElementById('updateInterval');
+                
+                loading.style.display = 'inline';
+                
+                try {{
+                    const response = await fetch('/api/config/source', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json',
+                        }},
+                        body: JSON.stringify({{source: newSource}})
+                    }});
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {{
+                        console.log('✅ Fuente cambiada a: ' + newSource);
+                        // Actualizar UI después de 2 segundos (tiempo para completar actualización)
+                        setTimeout(() => location.reload(), 2000);
+                    }} else {{
+                        alert('❌ Error al cambiar fuente: ' + data.error);
+                        // Revertir selección
+                        document.querySelectorAll('input[name="source"]').forEach(radio => {{
+                            radio.checked = false;
+                        }});
+                    }}
+                }} catch (error) {{
+                    alert('❌ Error de red: ' + error.message);
+                    document.querySelectorAll('input[name="source"]').forEach(radio => {{
+                        radio.checked = false;
+                    }});
+                }} finally {{
+                    loading.style.display = 'none';
+                }}
+            }}
+            
+            async function forceUpdate() {{
+                const loading = document.getElementById('updateLoading');
+                loading.style.display = 'inline';
+                loading.textContent = '🔄 Actualizando contenido...';
+                
+                try {{
+                    // Llamar a endpoint que fuerza actualización
+                    const response = await fetch('/status');
+                    
+                    if (response.ok) {{
+                        setTimeout(() => {{
+                            loading.textContent = '✅ Contenido actualizado exitosamente';
+                            loading.style.display = 'inline';
+                            setTimeout(() => location.reload(), 1500);
+                        }}, 2000);
+                    }} else {{
+                        loading.textContent = '❌ Error en la actualización';
+                        loading.style.display = 'inline';
+                    }}
+                }} catch (error) {{
+                    loading.textContent = '❌ Error de red: ' + error.message;
+                    loading.style.display = 'inline';
+                }}
+            }}
+            
             // Auto-submit al presionar Enter
             ['nameInput', 'urlInput', 'logoInput', 'groupInput'].forEach(id => {{
                 document.getElementById(id).addEventListener('keypress', function(e) {{
@@ -921,19 +1242,55 @@ def index():
     </html>
     """
 
-def init_scheduler():
-    """Inicializa el scheduler para actualizaciones automáticas"""
-    if not scheduler.running:
+def reconfigure_scheduler(source_type=None):
+    """Reconfigura el scheduler con el intervalo correcto según la fuente de M3U"""
+    if source_type is None:
+        source_type = config_manager.get_source()
+    
+    interval = PARSER_UPDATE_INTERVAL if source_type == 'parser' else update_interval
+    
+    try:
+        # Remover job anterior si existe
+        if scheduler.running:
+            try:
+                scheduler.remove_job('m3u_update')
+            except:
+                pass
+        
+        # Agregar nuevo job con intervalo correcto
         scheduler.add_job(
             func=update_cache,
             trigger="interval",
-            hours=update_interval,
+            hours=interval,
             id='m3u_update',
-            name='Actualización de caché M3U',
+            name=f'Actualización de caché M3U ({source_type})',
+            replace_existing=True
+        )
+        
+        logger.info(f"Scheduler reconfigurado: modo {source_type.upper()}, actualización cada {interval} horas")
+        return True
+    except Exception as e:
+        logger.error(f"Error reconfigurando scheduler: {e}")
+        return False
+
+
+def init_scheduler():
+    """Inicializa el scheduler para actualizaciones automáticas"""
+    if not scheduler.running:
+        source_type = config_manager.get_source()
+        interval = PARSER_UPDATE_INTERVAL if source_type == 'parser' else update_interval
+        
+        scheduler.add_job(
+            func=update_cache,
+            trigger="interval",
+            hours=interval,
+            id='m3u_update',
+            name=f'Actualización de caché M3U ({source_type})',
             replace_existing=True
         )
         scheduler.start()
-        logger.info(f"Scheduler iniciado: actualización cada {update_interval} horas")
+        logger.info(f"Scheduler iniciado: modo {source_type.upper()}, actualización cada {interval} horas")
+
 
 if __name__ == '__main__':
     logger.info("="*60)
