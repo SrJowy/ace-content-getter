@@ -1,12 +1,12 @@
+version: '3.8'
+
 services:
   ace-content-getter:
-    # Opción 1: Construir desde Dockerfile local (descomenta esta sección)
+    # Construir desde Dockerfile local
+    # Compatible con arquitectura modular refactorizada
     build:
       context: .
       dockerfile: Dockerfile
-    
-    # Opción 2: Usar imagen pre-construida (descomenta si la tienes publicada)
-    # image: tu-usuario/ace-content-getter:latest
     
     container_name: ace-content-getter
     

@@ -25,8 +25,9 @@ RUN mkdir -p /app/data && chown -R appuser:appuser /app/data && chmod 755 /app/d
 # Copiar venv de la etapa builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Copiar código de la aplicación
-COPY app.py .
+# Copiar código de la aplicación (estructura modular)
+COPY app/ ./app/
+COPY main.py requirements.txt ./
 
 # Configurar variables de entorno
 ENV PATH="/opt/venv/bin:$PATH" \
@@ -47,5 +48,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Exponer puerto
 EXPOSE 8080
 
-# Comando de inicio
-CMD ["python", "app.py"]
+# Comando de inicio (usar main.py - entry point nuevo)
+CMD ["python", "main.py"]

@@ -104,10 +104,17 @@ El Dockerfile utiliza **multi-stage build** para optimizar:
 1. **Builder stage**: Instala dependencias Python en un venv
 2. **Runtime stage**: Copia solo lo necesario (imagen más pequeña ~150MB)
 
+**Compatibilidad con refactorización modular:**
+- La aplicación ha sido refactorizada en una arquitectura modular bajo `app/`
+- El Dockerfile copia la estructura completa: `COPY app/ ./app/`
+- Usa `main.py` como entry point (nuevo recomendado)
+- Mantiene compatibilidad con `app.py` (wrapper que importa de `app/`)
+
 Beneficios:
 - Imagen final pequeña (sin herramientas de desarrollo)
-- Rápido de compilar tras cambios en app.py
+- Rápido de compilar tras cambios en código
 - Seguro (usuario no-root, sin herramientas innecesarias)
+- Arquitectura modular escalable
 
 ## Variables de entorno en Docker
 

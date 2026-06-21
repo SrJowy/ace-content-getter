@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Script para gestionar Docker Compose fácilmente en Linux/Mac
+# Compatible con arquitectura modular refactorizada
 
 set -e
 

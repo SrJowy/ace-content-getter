@@ -2,6 +2,7 @@
 
 # Script para preparar el entorno Docker en Linux/Mac
 # Ejecuta este script una única vez para configurar todo
+# Compatible con arquitectura modular refactorizada
 
 set -e
 
