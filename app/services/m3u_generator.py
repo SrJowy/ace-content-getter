@@ -120,7 +120,7 @@ class M3UGenerator:
                 if categories.get(category):
                     for link in categories[category]:
                         channel_name = _get_channel_name(link['name'])
-                        content += f"#EXTINF:-1, tvg-id=\"{channel_name}\",group-title=\"{category}\",{link['name']}\n"
+                        content += f"#EXTINF:-1 tvg-id=\"{channel_name}\" group-title=\"{category}\", {link['name']}\n"
                         content += f"{link['url']}\n"
             
             logger.info(f"Contenido M3U generado: {len(acestream_links)} streams")
