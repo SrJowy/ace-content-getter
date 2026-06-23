@@ -143,6 +143,18 @@ def _get_channel_name(channel_name: str) -> str:
     """
     splitter = re.split(r'1080p|720p|-->|\*', channel_name)
     tvg_id = splitter[0].strip()
+
+    if "FIFA 1" in tvg_id:
+        tvg_id = "DAZN Copa Mundial de FIFA"
+    elif "FIFA 2" in tvg_id:
+        tvg_id = "DAZN Copa Mundial de FIFA 2"
+    elif "Mundial" in tvg_id:
+        tvg_id = tvg_id + " HD"
+    elif "MOVISTAR +" in tvg_id or "MOVISTAR PLUS" in tvg_id:
+        tvg_id = "Movistar Plus HD"
+    elif "M+" in tvg_id:
+        tvg_id = tvg_id + " HD"
+
     return tvg_id
 
 
