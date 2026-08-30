@@ -142,19 +142,71 @@ def _get_channel_name(channel_name: str) -> str:
         tvg-id limpio
     """
     splitter = re.split(r'1080p|720p|-->|\*', channel_name)
-    tvg_id = splitter[0].strip()
+    tvg_id = splitter[0].strip().lower()
 
-    if "FIFA 1" in tvg_id:
-        tvg_id = "DAZN Copa Mundial de FIFA"
-    elif "FIFA 2" in tvg_id:
-        tvg_id = "DAZN Copa Mundial de FIFA 2"
-    elif "Mundial" in tvg_id:
-        tvg_id = tvg_id + " HD"
-    elif "MOVISTAR +" in tvg_id or "MOVISTAR PLUS" in tvg_id:
-        tvg_id = "Movistar Plus HD"
-    elif "M+" in tvg_id:
-        tvg_id = tvg_id + " HD"
-
+    if "dazn" in tvg_id:
+        if "laliga" in tvg_id:
+            if "2" in tvg_id:
+                tvg_id = "DAZN LaLiga 2 HD"
+            elif "3" in tvg_id:
+                tvg_id = "DAZN LaLiga 3"
+            else:
+                tvg_id = "DAZN LaLiga HD"
+        elif "f1" in tvg_id:
+            tvg_id = "DAZN F1 HD"
+        else:
+            if "2" in tvg_id:
+                tvg_id = "DAZN 2 HD"
+            elif "3" in tvg_id:
+                tvg_id = "DAZN 3 HD"
+            else:
+                tvg_id = "DAZN 1 HD"
+    elif "eurosport" in tvg_id:
+        if "2" in tvg_id:
+            tvg_id = "Eurosport 2"
+        else:
+            tvg_id = "Eurosport 1 HD"
+    elif "hypermotion" in tvg_id:
+        if "2" in tvg_id:
+            tvg_id = "LaLiga TV Hypermotion 2"
+        else:
+            tvg_id = "LaLiga TV Hypermotion HD"
+    elif "m+" in tvg_id or "m." in tvg_id or "movistar" in tvg_id:
+        if "laliga" in tvg_id and not "hypermotion" in tvg_id:
+            if "2" in tvg_id:
+                tvg_id = "M+ LaLiga 2 HD"
+            elif "3" in tvg_id:
+                tvg_id = "M+ LaLiga 3 HD"
+            else:
+                tvg_id = "M+ LaLiga HD"
+        elif "golf" in tvg_id:
+            tvg_id = "M+ Golf HD"
+        elif "vamos" in tvg_id:
+            if "2" in tvg_id:
+                tvg_id = "M+ Vamos 2"
+            elif "3" in tvg_id:
+                tvg_id = "M+ Vamos 3"
+            else:
+                tvg_id = "M+ Vamos HD"
+        elif "deportes" in tvg_id:
+            if "2" in tvg_id:
+                tvg_id = "M+ Deportes 2 HD"
+            elif "3" in tvg_id:
+                tvg_id = "M+ Deportes 3"
+            else:
+                tvg_id = "M+ Deportes HD"
+        elif "campeones" in tvg_id:
+            if "2" in tvg_id:
+                tvg_id = "M+ Liga de Campeones 2 HD "
+            elif "3" in tvg_id:
+                tvg_id = "M+ Liga de Campeones 3 HD"
+            else:
+                tvg_id = "M+ Liga de Campeones HD"
+        else:
+            tvg_id = "Movistar Plus HD"
+    elif "teledeporte" in tvg_id or "tdp" in tvg_id:
+        tvg_id = "Teledeporte"
+            
     return tvg_id
 
 
