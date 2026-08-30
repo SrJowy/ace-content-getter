@@ -208,7 +208,7 @@ def _get_channel_name(channel_name: str) -> str:
         tvg_id = "Teledeporte"
     elif "vamos" in tvg_id:
         tvg_id = "M+ Vamos HD"
-    elif "1rfef" in tvg_id or "1rfe" in tvg_id or "federacion" in tvg_id:
+    elif "rfef" in tvg_id or "federacion" in tvg_id:
         tvg_id = "Primera Federación"
             
     return tvg_id
