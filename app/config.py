@@ -21,6 +21,7 @@ SCRAPE_URL = os.getenv('SCRAPE_URL', 'https://ciriaco.netlify.app/')
 # Reemplazo de IP
 OLD_IP = os.getenv('OLD_IP', '127.0.0.1')
 NEW_IP = os.getenv('NEW_IP', '192.168.1.151')
+AWAY_IP = os.getenv('AWAY_IP', '100.80.52.89')
 
 # Intervalos de actualización (en horas)
 UPDATE_INTERVAL = int(os.getenv('UPDATE_INTERVAL', 12))  # Modo online
@@ -51,6 +52,7 @@ def get_config() -> dict:
         'ip_replacement': {
             'old_ip': OLD_IP,
             'new_ip': NEW_IP,
+            'away_ip': AWAY_IP,
         },
         'intervals': {
             'online': UPDATE_INTERVAL,

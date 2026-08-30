@@ -26,6 +26,7 @@ class CacheUpdater:
         m3u_url: str,
         old_ip: str,
         new_ip: str,
+        away_ip: str = None,
     ):
         """
         Inicializa el actualizador de caché
@@ -44,6 +45,7 @@ class CacheUpdater:
         self.m3u_url = m3u_url
         self.old_ip = old_ip
         self.new_ip = new_ip
+        self.away_ip = away_ip or new_ip
         self.parser = AcestreamParser()
         self.m3u_generator = M3UGenerator()
     
@@ -147,20 +149,28 @@ class CacheUpdater:
                 self.cache.set_error(error_msg)
                 return False
             
-            # Reemplazar IPs
+            # Reemplazar IPs para las dos salidas requeridas
             modified_content = self.m3u_generator.apply_ip_replacement(
                 combined_content,
                 self.old_ip,
                 self.new_ip
             )
+            away_content = self.m3u_generator.apply_ip_replacement(
+                combined_content,
+                self.old_ip,
+                self.away_ip
+            )
             
             # Guardar en caché
             self.cache.set(modified_content)
+            self.cache.set_away(away_content)
             
             logger.info(f"Reemplazo completado: {self.old_ip} -> {self.new_ip}")
+            logger.info(f"Reemplazo away completado: {self.old_ip} -> {self.away_ip}")
             logger.info(f"Streams personalizados incluidos: {len(streams)}")
             logger.info(f"Tamaño original: {len(combined_content)} bytes")
             logger.info(f"Tamaño modificado: {len(modified_content)} bytes")
+            logger.info(f"Tamaño away: {len(away_content)} bytes")
             logger.info("[ACTUALIZACIÓN] Caché actualizado exitosamente")
             
             return True

@@ -53,6 +53,7 @@ class APIRoutes:
     def _register_routes(self):
         """Registra todas las rutas en el blueprint"""
         self.blueprint.route('/stream.m3u')(self.serve_m3u)
+        self.blueprint.route('/stream_away.m3u')(self.serve_m3u_away)
         self.blueprint.route('/health')(self.health)
         self.blueprint.route('/status')(self.status)
         self.blueprint.route('/api/streams', methods=['GET'])(self.get_streams)
@@ -62,31 +63,36 @@ class APIRoutes:
         self.blueprint.route('/api/config/source', methods=['POST'])(self.set_source_config)
         self.blueprint.route('/')(self.index)
     
-    def serve_m3u(self):
-        """Sirve el archivo m3u modificado desde caché"""
+    def _serve_cached_m3u(self, getter, filename: str):
+        """Sirve una versión del archivo m3u desde caché."""
         try:
-            # Si el caché no está disponible, actualizar ahora
             if not self.cache.is_valid():
                 logger.info("Caché vacío, descargando...")
                 self.cache_updater.update()
-            
-            modified_content = self.cache.get()
-            
-            if modified_content is None:
-                return {'error': 'No se pudo obtener el archivo m3u'}, 503
-            
-            # Crear un archivo en memoria
-            file_stream = BytesIO(modified_content.encode('utf-8'))
-            
+
+            content = getter()
+
+            if content is None:
+                return {'error': f'No se pudo obtener el archivo {filename}'}, 503
+
+            file_stream = BytesIO(content.encode('utf-8'))
             return send_file(
                 file_stream,
                 mimetype='application/vnd.apple.mpegurl',
                 as_attachment=True,
-                download_name='stream.m3u'
+                download_name=filename
             )
         except Exception as e:
-            logger.error(f"Error al servir el archivo: {e}")
+            logger.error(f"Error al servir el archivo {filename}: {e}")
             return {'error': str(e)}, 500
+
+    def serve_m3u(self):
+        """Sirve el archivo m3u principal desde caché"""
+        return self._serve_cached_m3u(self.cache.get, 'stream.m3u')
+
+    def serve_m3u_away(self):
+        """Sirve el archivo m3u alternativo con la IP away"""
+        return self._serve_cached_m3u(self.cache.get_away, 'stream_away.m3u')
     
     def health(self):
         """Endpoint para verificar que el servidor está activo"""

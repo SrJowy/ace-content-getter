@@ -45,6 +45,7 @@ class AppManager:
             m3u_url=app_config['m3u']['url'],
             old_ip=app_config['ip_replacement']['old_ip'],
             new_ip=app_config['ip_replacement']['new_ip'],
+            away_ip=app_config['ip_replacement']['away_ip'],
         )
         
         # Guardar config para acceso posterior
@@ -184,6 +185,7 @@ class AppManager:
         logger.info(f"URL del m3u: {self.app_config['m3u']['url']}")
         logger.info(f"IP original: {self.app_config['ip_replacement']['old_ip']}")
         logger.info(f"IP nueva: {self.app_config['ip_replacement']['new_ip']}")
+        logger.info(f"IP away: {self.app_config['ip_replacement']['away_ip']}")
         logger.info(f"Directorio de datos: {self.app_config['paths']['data_dir']}")
         logger.info("="*60)
         

@@ -13,6 +13,7 @@ class M3UCache:
     def __init__(self):
         """Inicializa el caché vacío"""
         self.data: Optional[str] = None
+        self.away_data: Optional[str] = None
         self.last_update: Optional[datetime] = None
         self.lock = threading.Lock()
         self.update_in_progress = False
@@ -37,6 +38,13 @@ class M3UCache:
         """
         with self.lock:
             return self.data
+
+    def get_away(self) -> Optional[str]:
+        """
+        Obtiene el contenido M3U alternativo con la IP away
+        """
+        with self.lock:
+            return self.away_data
     
     def set(self, data: str) -> None:
         """
@@ -48,6 +56,14 @@ class M3UCache:
         with self.lock:
             self.data = data
             self.last_update = datetime.now()
+            self.last_error = None
+
+    def set_away(self, data: str) -> None:
+        """Establece el contenido M3U alternativo para la IP away."""
+        with self.lock:
+            self.away_data = data
+            if self.last_update is None:
+                self.last_update = datetime.now()
             self.last_error = None
     
     def set_error(self, error_msg: str) -> None:
@@ -64,6 +80,7 @@ class M3UCache:
         """Limpia el caché"""
         with self.lock:
             self.data = None
+            self.away_data = None
             self.last_update = None
             self.last_error = None
     
@@ -81,4 +98,5 @@ class M3UCache:
                 'update_in_progress': self.update_in_progress,
                 'last_error': self.last_error,
                 'size_bytes': len(self.data) if self.data else 0,
+                'away_size_bytes': len(self.away_data) if self.away_data else 0,
             }
