@@ -207,6 +207,62 @@
             font-weight: bold;
             margin-top: 10px;
         }
+        .channel-list {
+            display: grid;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .channel-item {
+            padding: 12px 14px;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            background: #f9f9f9;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .channel-item strong {
+            color: #333;
+        }
+        .channel-meta {
+            color: #666;
+            font-size: 12px;
+            word-break: break-all;
+        }
+        .channel-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            margin-top: 15px;
+            margin-bottom: 10px;
+        }
+        .channel-toolbar input {
+            flex: 1;
+            min-width: 200px;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .channel-pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+        .channel-pagination button {
+            padding: 8px 14px;
+            font-size: 12px;
+        }
+        .channel-pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
         .message {
             padding: 12px 16px;
             margin: 10px 0;
@@ -321,16 +377,6 @@
     </div>
     
     <div class="section">
-        <h2>⚙️ Configuración Principal</h2>
-        <ul>
-            <li>
-                <span><strong>URL de origen M3U:</strong></span>
-                <code>{{ m3u_url }}</code>
-            </li>
-        </ul>
-    </div>
-    
-    <div class="section">
         <h2>🔄 Configuración de Origen M3U</h2>
         <p style="margin-bottom: 15px; color: #666;">Elige la fuente de origen para obtener la lista M3U:</p>
         
@@ -421,6 +467,33 @@
         <p style="color: #999;">No hay streams personalizados agregados. ¡Agrega uno para comenzar!</p>
         {% endif %}
     </div>
+
+    <div class="section">
+        <h2>📡 Lista actual M3U ({{ channels_count }})</h2>
+        {% if current_channels %}
+        <div class="channel-toolbar">
+            <input type="text" id="channelSearch" placeholder="Buscar por nombre, grupo o URL..." />
+        </div>
+        <div id="channelList" class="channel-list">
+            {% for channel in current_channels %}
+            <div class="channel-item" data-name="{{ (channel.name or '') | lower }}" data-group="{{ (channel.group or '') | lower }}" data-url="{{ (channel.url or '') | lower }}">
+                <strong>{{ channel.name or 'Canal sin nombre' }}</strong>
+                {% if channel.group %}
+                <span class="channel-meta">Grupo: {{ channel.group }}</span>
+                {% endif %}
+                <span class="channel-meta">{{ channel.url }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="channel-pagination">
+            <button type="button" id="prevPage" class="btn-secondary">Anterior</button>
+            <span id="pageInfo">Página 1</span>
+            <button type="button" id="nextPage" class="btn-secondary">Siguiente</button>
+        </div>
+        {% else %}
+        <p style="color: #999;">Todavía no hay contenido M3U en caché.</p>
+        {% endif %}
+    </div>
     
     <div class="section">
         <h2>🔗 Endpoints Disponibles</h2>
@@ -428,6 +501,10 @@
             <li>
                 <span><a href="/stream.m3u">/stream.m3u</a></span>
                 <span>Descargar el archivo M3U modificado</span>
+            </li>
+            <li>
+                <span><a href="/stream_away.m3u">/stream_away.m3u</a></span>
+                <span>Descargar el archivo M3U para usar con Tailscale</span>
             </li>
             <li>
                 <span><a href="/status">/status</a></span>
@@ -578,22 +655,104 @@
             loading.textContent = '🔄 Actualizando contenido...';
             
             try {
-                const response = await fetch('/status');
+                const response = await fetch('/api/refresh', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const data = await response.json();
+
                 if (response.ok) {
-                    setTimeout(() => {
-                        loading.textContent = '✅ Contenido actualizado exitosamente';
-                        loading.style.display = 'inline';
-                        setTimeout(() => location.reload(), 1500);
-                    }, 2000);
+                    loading.textContent = data.status === 'updated'
+                        ? '✅ Contenido actualizado exitosamente'
+                        : 'ℹ️ La actualización ya estaba en curso';
+                    setTimeout(() => location.reload(), 1500);
                 } else {
-                    loading.textContent = '❌ Error en la actualización';
-                    loading.style.display = 'inline';
+                    loading.textContent = '❌ Error en la actualización: ' + (data.error || 'desconocido');
                 }
             } catch (error) {
                 loading.textContent = '❌ Error de red: ' + error.message;
-                loading.style.display = 'inline';
             }
         }
+
+        const channelPageSize = 20;
+        const channelSearchInput = document.getElementById('channelSearch');
+        const channelItems = Array.from(document.querySelectorAll('.channel-item'));
+        const prevPageButton = document.getElementById('prevPage');
+        const nextPageButton = document.getElementById('nextPage');
+        const pageInfo = document.getElementById('pageInfo');
+
+        let currentChannelPage = 1;
+
+        function renderChannelPage() {
+            if (!channelSearchInput || channelItems.length === 0) {
+                return;
+            }
+
+            const query = channelSearchInput.value.trim().toLowerCase();
+            const filtered = channelItems.filter(item => {
+                const name = item.dataset.name || '';
+                const group = item.dataset.group || '';
+                const url = item.dataset.url || '';
+                return !query || name.includes(query) || group.includes(query) || url.includes(query);
+            });
+
+            const totalPages = Math.max(1, Math.ceil(filtered.length / channelPageSize));
+            currentChannelPage = Math.min(currentChannelPage, totalPages);
+
+            channelItems.forEach(item => {
+                item.style.display = 'none';
+            });
+
+            const startIndex = (currentChannelPage - 1) * channelPageSize;
+            const visibleItems = filtered.slice(startIndex, startIndex + channelPageSize);
+
+            visibleItems.forEach(item => {
+                item.style.display = 'flex';
+            });
+
+            pageInfo.textContent = filtered.length === 0
+                ? 'Sin resultados'
+                : `Página ${currentChannelPage} de ${totalPages}`;
+
+            prevPageButton.disabled = currentChannelPage === 1;
+            nextPageButton.disabled = currentChannelPage >= totalPages;
+        }
+
+        if (channelSearchInput) {
+            channelSearchInput.addEventListener('input', () => {
+                currentChannelPage = 1;
+                renderChannelPage();
+            });
+        }
+
+        if (prevPageButton) {
+            prevPageButton.addEventListener('click', () => {
+                if (currentChannelPage > 1) {
+                    currentChannelPage -= 1;
+                    renderChannelPage();
+                }
+            });
+        }
+
+        if (nextPageButton) {
+            nextPageButton.addEventListener('click', () => {
+                const query = channelSearchInput.value.trim().toLowerCase();
+                const filtered = channelItems.filter(item => {
+                    const name = item.dataset.name || '';
+                    const group = item.dataset.group || '';
+                    const url = item.dataset.url || '';
+                    return !query || name.includes(query) || group.includes(query) || url.includes(query);
+                });
+                const totalPages = Math.max(1, Math.ceil(filtered.length / channelPageSize));
+
+                if (currentChannelPage < totalPages) {
+                    currentChannelPage += 1;
+                    renderChannelPage();
+                }
+            });
+        }
+
+        renderChannelPage();
         
         ['nameInput', 'urlInput', 'logoInput', 'groupInput'].forEach(id => {
             document.getElementById(id).addEventListener('keypress', function(e) {

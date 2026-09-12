@@ -3,6 +3,7 @@ Rutas API de Flask
 Expone todos los endpoints de la aplicación
 """
 
+import re
 from io import BytesIO
 from flask import Blueprint, send_file, jsonify, request, render_template
 from app.utils.logger import get_logger
@@ -56,6 +57,7 @@ class APIRoutes:
         self.blueprint.route('/stream_away.m3u')(self.serve_m3u_away)
         self.blueprint.route('/health')(self.health)
         self.blueprint.route('/status')(self.status)
+        self.blueprint.route('/api/refresh', methods=['POST'])(self.refresh_cache)
         self.blueprint.route('/api/streams', methods=['GET'])(self.get_streams)
         self.blueprint.route('/api/streams', methods=['POST'])(self.add_stream)
         self.blueprint.route('/api/streams/<stream_id>', methods=['PUT'])(self.update_stream)
@@ -117,6 +119,28 @@ class APIRoutes:
             }
         }
         return jsonify(status_info), 200
+
+    def refresh_cache(self):
+        """Forza una actualización inmediata del caché y de los streams."""
+        try:
+            success = self.cache_updater.update()
+            cache_info = self.cache.get_info()
+            last_update = cache_info.get('last_update')
+
+            if success:
+                return jsonify({
+                    'status': 'updated',
+                    'message': 'Caché actualizado correctamente',
+                    'last_update': last_update,
+                }), 200
+            return jsonify({
+                'status': 'skipped',
+                'message': 'La actualización ya estaba en progreso o falló',
+                'last_update': last_update,
+            }), 200
+        except Exception as e:
+            logger.error(f"Error al forzar actualización del caché: {e}")
+            return jsonify({'error': str(e)}), 500
     
     def get_streams(self):
         """Obtiene la lista de streams personalizados"""
@@ -242,6 +266,38 @@ class APIRoutes:
             logger.error(f"Error al cambiar fuente: {e}")
             return jsonify({'error': str(e)}), 500
     
+    def _extract_m3u_channels(self, content: str):
+        """Extrae nombre, grupo y URL de cada canal del contenido M3U actual."""
+        if not content:
+            return []
+
+        channels = []
+        pending = None
+
+        for line in content.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith('#EXTINF:'):
+                pending = {'name': '', 'group': '', 'url': ''}
+                group_match = re.search(r'group-title="([^"]+)"', line)
+                if group_match:
+                    pending['group'] = group_match.group(1)
+
+                name_match = re.search(r',\s*(.*)$', line)
+                if name_match:
+                    pending['name'] = name_match.group(1).strip()
+                continue
+
+            if line.startswith('http') or line.startswith('rtmp') or line.startswith('udp'):
+                if pending is not None:
+                    pending['url'] = line
+                    channels.append(pending)
+                    pending = None
+
+        return channels
+
     def index(self):
         """Página de inicio (requiere template HTML)"""
         try:
@@ -249,6 +305,7 @@ class APIRoutes:
             cache_info = self.cache.get_info()
             last_update = cache_info['last_update']
             streams = self.stream_manager.get_streams()
+            current_channels = self._extract_m3u_channels(self.cache.get() or '')
             
             # Información del modo de origen
             current_source = self.config_manager.get_source()
@@ -271,12 +328,13 @@ class APIRoutes:
                 cache_status=cache_status,
                 last_update=last_update,
                 update_interval=self.update_interval,
-                m3u_url=self.m3u_url,
                 streams=streams,
                 streams_count=len(streams),
                 current_source=current_source,
                 current_interval=current_interval,
                 last_parser_run=last_parser_run,
+                current_channels=current_channels,
+                channels_count=len(current_channels),
             )
         except Exception as e:
             logger.error(f"Error al servir página de inicio: {e}")
