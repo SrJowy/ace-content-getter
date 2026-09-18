@@ -36,7 +36,8 @@ ENV PATH="/opt/venv/bin:$PATH" \
     SERVER_PORT=8080 \
     OLD_IP=127.0.0.1 \
     NEW_IP=192.168.1.151 \
-    UPDATE_INTERVAL=12
+    UPDATE_INTERVAL=12 \
+    PARSER_UPDATE_INTERVAL=6
 
 # Cambiar al usuario no-root
 USER appuser

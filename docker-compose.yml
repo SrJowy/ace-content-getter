@@ -28,6 +28,7 @@ services:
       
       # Intervalo de actualización en horas
       UPDATE_INTERVAL: "${UPDATE_INTERVAL:-12}"
+      PARSER_UPDATE_INTERVAL: "${PARSER_UPDATE_INTERVAL:-6}"
       
       # Directorio de datos (para persistencia de URLs personalizadas)
       DATA_DIR: "/app/data"
