@@ -4,6 +4,7 @@ Extrae, limpia y categoriza streams de acestream desde una URL
 """
 
 import re
+import time
 from typing import List, Dict
 import requests
 from bs4 import BeautifulSoup
@@ -11,6 +12,9 @@ from app.utils.logger import get_logger
 from app.utils.constants import USER_AGENT, DEFAULT_TIMEOUT, CHANNEL_CATEGORIES, DEFAULT_CATEGORY
 
 logger = get_logger(__name__)
+
+MAX_RETRIES = 2
+RETRY_DELAY_SECONDS = 1
 
 
 class AcestreamParser:
@@ -37,10 +41,25 @@ class AcestreamParser:
         """
         target_url = url or self.scrape_url
         
+        headers = {'User-Agent': USER_AGENT}
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                response = requests.get(target_url, headers=headers, timeout=DEFAULT_TIMEOUT)
+                response.raise_for_status()
+                break
+            except requests.RequestException as e:
+                if attempt == MAX_RETRIES:
+                    logger.error(f"Error al scrapear {target_url}: {e}")
+                    return []
+
+                retry_number = attempt + 1
+                logger.warning(
+                    f"Error al scrapear {target_url}: {e}. "
+                    f"Reintento {retry_number}/{MAX_RETRIES} en {RETRY_DELAY_SECONDS}s"
+                )
+                time.sleep(RETRY_DELAY_SECONDS)
+        
         try:
-            headers = {'User-Agent': USER_AGENT}
-            response = requests.get(target_url, headers=headers, timeout=DEFAULT_TIMEOUT)
-            response.raise_for_status()
             
             logger.info(f"Scrapeando {target_url}...")
             soup = BeautifulSoup(response.content, 'html.parser')
