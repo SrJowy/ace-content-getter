@@ -4,13 +4,17 @@ Expone todos los endpoints de la aplicación
 """
 
 import re
+import uuid
 from io import BytesIO
-from flask import Blueprint, send_file, jsonify, request, render_template
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
+import requests
+from flask import Blueprint, Response, send_file, jsonify, request, render_template, stream_with_context
 from app.utils.logger import get_logger
 from app.models.cache import M3UCache
 from app.models.config import ConfigManager
 from app.services.stream_manager import StreamManager
 from app.services.cache_updater import CacheUpdater
+from app.utils.constants import DEFAULT_TIMEOUT, USER_AGENT
 
 logger = get_logger(__name__)
 
@@ -58,6 +62,8 @@ class APIRoutes:
         self.blueprint.route('/health')(self.health)
         self.blueprint.route('/status')(self.status)
         self.blueprint.route('/api/refresh', methods=['POST'])(self.refresh_cache)
+        self.blueprint.route('/api/player/acestream/<info_hash>', methods=['GET'])(self.proxy_acestream)
+        self.blueprint.route('/api/player/acestream/away/<info_hash>', methods=['GET'])(self.proxy_acestream_away)
         self.blueprint.route('/api/streams', methods=['GET'])(self.get_streams)
         self.blueprint.route('/api/streams', methods=['POST'])(self.add_stream)
         self.blueprint.route('/api/streams/<stream_id>', methods=['PUT'])(self.update_stream)
@@ -141,6 +147,146 @@ class APIRoutes:
         except Exception as e:
             logger.error(f"Error al forzar actualización del caché: {e}")
             return jsonify({'error': str(e)}), 500
+
+    def proxy_acestream_away(self, info_hash):
+        """Retransmite la variante away de un stream AceStream."""
+        return self.proxy_acestream(info_hash, away=True)
+
+    def proxy_acestream(self, info_hash, away=False):
+        """Retransmite un stream AceStream desde la M3U cacheada, evitando CORS."""
+        if not re.fullmatch(r'[a-fA-F0-9]{40}', info_hash):
+            return jsonify({'error': 'ID AceStream no válido'}), 400
+
+        source_url = None
+        m3u_content = self.cache.get_away() if away else self.cache.get()
+        for line in (m3u_content or '').splitlines():
+            candidate = line.strip()
+            if not candidate.startswith('http://'):
+                continue
+
+            try:
+                parsed_url = urlsplit(candidate)
+                if parsed_url.path != '/ace/getstream' or parsed_url.port != 8088:
+                    continue
+            except ValueError:
+                continue
+
+            if parse_qs(parsed_url.query).get('id') == [info_hash]:
+                source_url = candidate
+                break
+
+        if source_url is None:
+            return jsonify({'error': 'El stream no está en la lista M3U solicitada'}), 404
+
+        source = urlsplit(source_url)
+        source_host = source.hostname
+        session_query = parse_qs(source.query)
+        session_query['format'] = ['json']
+        session_query['pid'] = [uuid.uuid4().hex]
+        session_url = urlunsplit((
+            source.scheme,
+            source.netloc,
+            source.path,
+            urlencode(session_query, doseq=True),
+            source.fragment,
+        ))
+
+        try:
+            session_response = requests.get(
+                session_url,
+                headers={'User-Agent': USER_AGENT},
+                timeout=(DEFAULT_TIMEOUT, 10),
+                allow_redirects=False,
+            )
+            session_payload = session_response.json()
+            session_response.close()
+        except (requests.RequestException, ValueError) as error:
+            logger.warning(f"No se pudo iniciar la sesión AceStream {info_hash}: {error}")
+            return jsonify({'error': 'No se pudo iniciar la sesión AceStream'}), 502
+
+        session = session_payload.get('response')
+        if not isinstance(session, dict):
+            return jsonify({'error': 'El motor AceStream no devolvió datos de sesión'}), 502
+
+        playback_url = session.get('playback_url')
+        try:
+            playback = urlsplit(playback_url)
+            valid_playback_url = (
+                playback.scheme == 'http'
+                and playback.hostname == source_host
+                and playback.port == 6878
+                and playback.path.startswith('/ace/r/')
+            )
+        except (TypeError, ValueError):
+            valid_playback_url = False
+
+        if not valid_playback_url:
+            return jsonify({'error': 'El motor AceStream devolvió URLs de sesión no válidas'}), 502
+
+        headers = {'User-Agent': USER_AGENT}
+        if request.headers.get('Range'):
+            headers['Range'] = request.headers['Range']
+
+        upstream_url = playback_url
+        for _ in range(5):
+            try:
+                upstream = requests.get(
+                    upstream_url,
+                    headers=headers,
+                    stream=True,
+                    timeout=(DEFAULT_TIMEOUT, 30),
+                    allow_redirects=False,
+                )
+            except requests.RequestException as error:
+                logger.warning(f"No se pudo abrir el stream AceStream {info_hash}: {error}")
+                return jsonify({'error': 'No se pudo conectar con el motor AceStream'}), 502
+
+            if upstream.status_code not in (301, 302, 303, 307, 308):
+                break
+
+            location = upstream.headers.get('Location')
+            if not location:
+                upstream.close()
+                return jsonify({'error': 'El motor AceStream devolvió una redirección sin destino'}), 502
+
+            redirected_url = urljoin(upstream_url, location)
+            try:
+                redirected = urlsplit(redirected_url)
+                redirect_is_valid = (
+                    redirected.scheme == 'http'
+                    and redirected.hostname == source_host
+                    and redirected.port == 6878
+                )
+            except ValueError:
+                redirect_is_valid = False
+
+            upstream.close()
+            if not redirect_is_valid:
+                return jsonify({'error': 'El motor AceStream redirigió a un destino no permitido'}), 502
+
+            upstream_url = redirected_url
+        else:
+            upstream.close()
+            return jsonify({'error': 'Demasiadas redirecciones del motor AceStream'}), 502
+
+        response_headers = {'Cache-Control': 'no-store'}
+        for header in ('Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges'):
+            if header in upstream.headers:
+                response_headers[header] = upstream.headers[header]
+
+        def stream_chunks():
+            try:
+                for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        yield chunk
+            finally:
+                upstream.close()
+
+        return Response(
+            stream_with_context(stream_chunks()),
+            status=upstream.status_code,
+            headers=response_headers,
+        )
     
     def get_streams(self):
         """Obtiene la lista de streams personalizados"""
@@ -306,6 +452,7 @@ class APIRoutes:
             last_update = cache_info['last_update']
             streams = self.stream_manager.get_streams()
             current_channels = self._extract_m3u_channels(self.cache.get() or '')
+            away_channels = self._extract_m3u_channels(self.cache.get_away() or '')
             
             # Información del modo de origen
             current_source = self.config_manager.get_source()
@@ -335,6 +482,8 @@ class APIRoutes:
                 last_parser_run=last_parser_run,
                 current_channels=current_channels,
                 channels_count=len(current_channels),
+                away_channels=away_channels,
+                away_channels_count=len(away_channels),
             )
         except Exception as e:
             logger.error(f"Error al servir página de inicio: {e}")

@@ -156,7 +156,7 @@
         }
         .stream-item {
             display: grid;
-            grid-template-columns: 60px 1fr 200px;
+            grid-template-columns: 60px 1fr 270px;
             gap: 15px;
             align-items: center;
             padding: 15px;
@@ -201,6 +201,51 @@
             font-size: 12px;
             width: 100%;
         }
+        .channel-item button {
+            align-self: flex-start;
+            padding: 7px 12px;
+            font-size: 12px;
+        }
+        .player-dialog {
+            width: min(900px, calc(100% - 32px));
+            max-width: none;
+            margin: auto;
+            padding: 0;
+            border: 0;
+            border-radius: 8px;
+            background: #111;
+            color: white;
+        }
+        .player-dialog::backdrop {
+            background: rgba(0, 0, 0, 0.8);
+        }
+        .player-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            padding: 14px 18px;
+        }
+        .player-header h3 {
+            overflow-wrap: anywhere;
+        }
+        .player-header button {
+            flex: 0 0 auto;
+            padding: 7px 12px;
+        }
+        #streamPlayer {
+            display: block;
+            width: 100%;
+            max-height: 75vh;
+            aspect-ratio: 16 / 9;
+            background: black;
+        }
+        #playerStatus {
+            min-height: 24px;
+            padding: 8px 18px 14px;
+            color: #ddd;
+            overflow-wrap: anywhere;
+        }
         .loading {
             display: none;
             color: #667eea;
@@ -236,6 +281,14 @@
             align-items: center;
             margin-top: 15px;
             margin-bottom: 10px;
+        }
+        .channel-source-toggle {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+        }
+        .channel-source-toggle button[aria-pressed="true"] {
+            background: #343a40;
         }
         .channel-toolbar input {
             flex: 1;
@@ -457,6 +510,7 @@
                     <br><small style="color: #666;">{{ stream.url }}</small>
                 </div>
                 <div class="stream-actions">
+                    <button type="button" class="play-stream-button" data-stream-url="{{ stream.url }}" data-stream-name="{{ stream.name }}">▶ Reproducir</button>
                     <button onclick="editStream('{{ stream.id }}')">✏️ Editar</button>
                     <button onclick="deleteStream('{{ stream.id }}')">🗑️ Eliminar</button>
                 </div>
@@ -469,20 +523,27 @@
     </div>
 
     <div class="section">
-        <h2>📡 Lista actual M3U ({{ channels_count }})</h2>
-        {% if current_channels %}
+        <h2>📡 Listas M3U</h2>
+        <div class="channel-source-toggle" role="group" aria-label="Origen del stream">
+            <button type="button" id="homeChannelsButton" aria-pressed="true">Home ({{ channels_count }})</button>
+            <button type="button" id="awayChannelsButton" class="btn-secondary" aria-pressed="false">Away ({{ away_channels_count }})</button>
+        </div>
+        {% if current_channels or away_channels %}
         <div class="channel-toolbar">
             <input type="text" id="channelSearch" placeholder="Buscar por nombre, grupo o URL..." />
         </div>
         <div id="channelList" class="channel-list">
-            {% for channel in current_channels %}
-            <div class="channel-item" data-name="{{ (channel.name or '') | lower }}" data-group="{{ (channel.group or '') | lower }}" data-url="{{ (channel.url or '') | lower }}">
+            {% for source, channels in [('home', current_channels), ('away', away_channels)] %}
+            {% for channel in channels %}
+            <div class="channel-item" data-source="{{ source }}" data-name="{{ (channel.name or '') | lower }}" data-group="{{ (channel.group or '') | lower }}" data-url="{{ (channel.url or '') | lower }}">
                 <strong>{{ channel.name or 'Canal sin nombre' }}</strong>
                 {% if channel.group %}
                 <span class="channel-meta">Grupo: {{ channel.group }}</span>
                 {% endif %}
                 <span class="channel-meta">{{ channel.url }}</span>
+                <button type="button" class="play-stream-button" data-stream-source="{{ source }}" data-stream-url="{{ channel.url }}" data-stream-name="{{ channel.name or 'Canal sin nombre' }}">▶ Reproducir</button>
             </div>
+            {% endfor %}
             {% endfor %}
         </div>
         <div class="channel-pagination">
@@ -494,6 +555,15 @@
         <p style="color: #999;">Todavía no hay contenido M3U en caché.</p>
         {% endif %}
     </div>
+
+    <dialog id="playerDialog" class="player-dialog" aria-labelledby="playerTitle">
+        <div class="player-header">
+            <h3 id="playerTitle"></h3>
+            <button type="button" class="btn-secondary" onclick="closePlayer()" aria-label="Cerrar reproductor">Cerrar</button>
+        </div>
+        <video id="streamPlayer" controls autoplay playsinline></video>
+        <p id="playerStatus" role="status"></p>
+    </dialog>
     
     <div class="section">
         <h2>🔗 Endpoints Disponibles</h2>
@@ -534,7 +604,121 @@
         </ol>
     </div>
     
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
     <script>
+        const playerDialog = document.getElementById('playerDialog');
+        let streamPlayer = document.getElementById('streamPlayer');
+        const playerStatus = document.getElementById('playerStatus');
+        let activePlayer = null;
+
+        function stopPlayer() {
+            if (activePlayer) {
+                activePlayer.pause();
+                activePlayer.unload();
+                activePlayer.detachMediaElement();
+                activePlayer.destroy();
+                activePlayer = null;
+            }
+            streamPlayer.pause();
+            streamPlayer.removeAttribute('src');
+            streamPlayer.load();
+
+            const freshVideo = document.createElement('video');
+            freshVideo.id = 'streamPlayer';
+            freshVideo.controls = true;
+            freshVideo.autoplay = true;
+            freshVideo.playsInline = true;
+            streamPlayer.replaceWith(freshVideo);
+            streamPlayer = freshVideo;
+        }
+
+        function closePlayer() {
+            playerDialog.close();
+        }
+
+        playerDialog.addEventListener('close', () => {
+            stopPlayer();
+            window.location.reload();
+        });
+
+        async function playStream(url, name, streamSource = 'home') {
+            stopPlayer();
+            document.getElementById('playerTitle').textContent = name;
+            playerStatus.textContent = 'Conectando con el stream...';
+            playerDialog.showModal();
+
+            let path;
+            try {
+                path = new URL(url, window.location.href).pathname.toLowerCase();
+            } catch (error) {
+                playerStatus.textContent = 'La URL del stream no es válida.';
+                return;
+            }
+
+            streamPlayer.onerror = () => {
+                playerStatus.textContent = 'No se pudo reproducir el stream. Comprueba que la URL y el servicio de origen estén disponibles.';
+            };
+            streamPlayer.onplaying = () => {
+                playerStatus.textContent = '';
+            };
+
+            if (path.endsWith('.m3u8')) {
+                if (streamPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                    streamPlayer.src = url;
+                } else if (window.Hls && Hls.isSupported()) {
+                    activePlayer = new Hls();
+                    activePlayer.loadSource(url);
+                    activePlayer.attachMedia(streamPlayer);
+                } else {
+                    playerStatus.textContent = 'Este navegador no admite la reproducción HLS.';
+                    return;
+                }
+            } else if (path.endsWith('.ts') || path.includes('/ace/getstream')) {
+                if (!window.mpegts || !mpegts.isSupported()) {
+                    playerStatus.textContent = 'Este navegador no admite la reproducción MPEG-TS necesaria para este stream.';
+                    return;
+                }
+                let playbackUrl = url;
+                if (path.includes('/ace/getstream')) {
+                    const infoHash = new URL(url, window.location.href).searchParams.get('id');
+                    if (!infoHash || !/^[a-f0-9]{40}$/i.test(infoHash)) {
+                        playerStatus.textContent = 'El ID del stream AceStream no es válido.';
+                        return;
+                    }
+                    const sourcePath = streamSource === 'away'
+                        ? `/api/player/acestream/away/${infoHash}`
+                        : `/api/player/acestream/${infoHash}`;
+                    playbackUrl = new URL(sourcePath, window.location.origin).href;
+                }
+                activePlayer = mpegts.createPlayer({type: 'mpegts', isLive: true, url: playbackUrl});
+                activePlayer.attachMediaElement(streamPlayer);
+                const mpegtsPlayer = activePlayer;
+                streamPlayer.addEventListener('canplay', () => {
+                    if (activePlayer !== mpegtsPlayer) {
+                        return;
+                    }
+                    mpegtsPlayer.play().catch(error => {
+                        playerStatus.textContent = `No se pudo iniciar la reproducción: ${error.message}`;
+                    });
+                }, {once: true});
+                mpegtsPlayer.load();
+                return;
+            } else {
+                streamPlayer.src = url;
+            }
+
+            streamPlayer.play().catch(error => {
+                playerStatus.textContent = `No se pudo iniciar la reproducción: ${error.message}`;
+            });
+        }
+
+        document.querySelectorAll('.play-stream-button').forEach(button => {
+            button.addEventListener('click', () => {
+                playStream(button.dataset.streamUrl, button.dataset.streamName, button.dataset.streamSource || 'home');
+            });
+        });
+
         async function addStream() {
             const name = document.getElementById('nameInput').value.trim();
             const url = document.getElementById('urlInput').value.trim();
@@ -680,8 +864,11 @@
         const prevPageButton = document.getElementById('prevPage');
         const nextPageButton = document.getElementById('nextPage');
         const pageInfo = document.getElementById('pageInfo');
+        const homeChannelsButton = document.getElementById('homeChannelsButton');
+        const awayChannelsButton = document.getElementById('awayChannelsButton');
 
         let currentChannelPage = 1;
+        let currentChannelSource = 'home';
 
         function renderChannelPage() {
             if (!channelSearchInput || channelItems.length === 0) {
@@ -690,6 +877,9 @@
 
             const query = channelSearchInput.value.trim().toLowerCase();
             const filtered = channelItems.filter(item => {
+                if (item.dataset.source !== currentChannelSource) {
+                    return false;
+                }
                 const name = item.dataset.name || '';
                 const group = item.dataset.group || '';
                 const url = item.dataset.url || '';
@@ -718,6 +908,17 @@
             nextPageButton.disabled = currentChannelPage >= totalPages;
         }
 
+        function setChannelSource(source) {
+            currentChannelSource = source;
+            currentChannelPage = 1;
+            homeChannelsButton.setAttribute('aria-pressed', String(source === 'home'));
+            awayChannelsButton.setAttribute('aria-pressed', String(source === 'away'));
+            renderChannelPage();
+        }
+
+        homeChannelsButton.addEventListener('click', () => setChannelSource('home'));
+        awayChannelsButton.addEventListener('click', () => setChannelSource('away'));
+
         if (channelSearchInput) {
             channelSearchInput.addEventListener('input', () => {
                 currentChannelPage = 1;
@@ -738,6 +939,9 @@
             nextPageButton.addEventListener('click', () => {
                 const query = channelSearchInput.value.trim().toLowerCase();
                 const filtered = channelItems.filter(item => {
+                    if (item.dataset.source !== currentChannelSource) {
+                        return false;
+                    }
                     const name = item.dataset.name || '';
                     const group = item.dataset.group || '';
                     const url = item.dataset.url || '';
