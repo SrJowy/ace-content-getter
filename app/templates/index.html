@@ -605,7 +605,7 @@
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.8.2/dist/mpegts.min.js"></script>
     <script>
         const playerDialog = document.getElementById('playerDialog');
         let streamPlayer = document.getElementById('streamPlayer');
@@ -655,6 +655,11 @@
                 playerStatus.textContent = 'La URL del stream no es válida.';
                 return;
             }
+            const isAceStream = path.includes('/ace/getstream');
+            const mpegtsFeatures = window.mpegts && mpegts.getFeatureList
+                ? mpegts.getFeatureList()
+                : null;
+            const supportsMpegtsLive = Boolean(mpegtsFeatures && mpegtsFeatures.mseLivePlayback);
 
             streamPlayer.onerror = () => {
                 playerStatus.textContent = 'No se pudo reproducir el stream. Comprueba que la URL y el servicio de origen estén disponibles.';
@@ -663,28 +668,8 @@
                 playerStatus.textContent = '';
             };
 
-            const isAceStream = path.includes('/ace/getstream');
-            if (isAceStream && streamPlayer.canPlayType('application/vnd.apple.mpegurl')) {
-                const infoHash = new URL(url, window.location.href).searchParams.get('id');
-                if (!infoHash || !/^[a-f0-9]{40}$/i.test(infoHash)) {
-                    playerStatus.textContent = 'El ID del stream AceStream no es válido.';
-                    return;
-                }
-
-                const hlsPath = streamSource === 'away'
-                    ? `/api/player/acestream/hls/away/${infoHash}`
-                    : `/api/player/acestream/hls/${infoHash}`;
-                try {
-                    const response = await fetch(hlsPath);
-                    const data = await response.json();
-                    if (!response.ok || !data.playback_url) {
-                        throw new Error(data.error || 'No se pudo iniciar la sesión HLS.');
-                    }
-                    streamPlayer.src = data.playback_url;
-                    await streamPlayer.play();
-                } catch (error) {
-                    playerStatus.textContent = `No se pudo iniciar la reproducción HLS: ${error.message}`;
-                }
+            if (isAceStream && !supportsMpegtsLive) {
+                playerStatus.textContent = 'Este navegador no admite MPEG-TS en directo mediante MSE. Actualiza Safari o usa un proxy HLS compatible.';
                 return;
             }
 
@@ -729,27 +714,8 @@
                 }, {once: true});
                 mpegtsPlayer.load();
                 return;
-            } else {
-                streamPlayer.src = url;
-            }
-
-            streamPlayer.play().catch(error => {
-                playerStatus.textContent = `No se pudo iniciar la reproducción: ${error.message}`;
-            });
-        }
-
-        document.querySelectorAll('.play-stream-button').forEach(button => {
-            button.addEventListener('click', () => {
-                playStream(button.dataset.streamUrl, button.dataset.streamName, button.dataset.streamSource || 'home');
-            });
-        });
-
-        async function addStream() {
-            const name = document.getElementById('nameInput').value.trim();
-            const url = document.getElementById('urlInput').value.trim();
-            const logo = document.getElementById('logoInput').value.trim();
-            const group = document.getElementById('groupInput').value.trim();
-            const messageDiv = document.getElementById('message');
+                    if (isAceStream && !supportsMpegtsLive) {
+                        playerStatus.textContent = 'Este navegador no admite MPEG-TS en directo mediante MSE. Actualiza Safari a una versión compatible o usa un proxy HLS corregido.';
             const loading = document.getElementById('loading');
             
             messageDiv.style.display = 'none';

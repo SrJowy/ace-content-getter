@@ -64,8 +64,6 @@ class APIRoutes:
         self.blueprint.route('/api/refresh', methods=['POST'])(self.refresh_cache)
         self.blueprint.route('/api/player/acestream/<info_hash>', methods=['GET'])(self.proxy_acestream)
         self.blueprint.route('/api/player/acestream/away/<info_hash>', methods=['GET'])(self.proxy_acestream_away)
-        self.blueprint.route('/api/player/acestream/hls/<info_hash>', methods=['GET'])(self.create_acestream_hls)
-        self.blueprint.route('/api/player/acestream/hls/away/<info_hash>', methods=['GET'])(self.create_acestream_hls_away)
         self.blueprint.route('/api/streams', methods=['GET'])(self.get_streams)
         self.blueprint.route('/api/streams', methods=['POST'])(self.add_stream)
         self.blueprint.route('/api/streams/<stream_id>', methods=['PUT'])(self.update_stream)
@@ -153,80 +151,6 @@ class APIRoutes:
     def proxy_acestream_away(self, info_hash):
         """Retransmite la variante away de un stream AceStream."""
         return self.proxy_acestream(info_hash, away=True)
-
-    def create_acestream_hls_away(self, info_hash):
-        """Inicia una sesión HLS para la lista away."""
-        return self.create_acestream_hls(info_hash, away=True)
-
-    def create_acestream_hls(self, info_hash, away=False):
-        """Devuelve la URL HLS nativa de una sesión AceStream."""
-        if not re.fullmatch(r'[a-fA-F0-9]{40}', info_hash):
-            return jsonify({'error': 'ID AceStream no válido'}), 400
-
-        m3u_content = self.cache.get_away() if away else self.cache.get()
-        source_url = None
-        for line in (m3u_content or '').splitlines():
-            candidate = line.strip()
-            if not candidate.startswith('http://'):
-                continue
-
-            try:
-                parsed_url = urlsplit(candidate)
-                if parsed_url.path != '/ace/getstream' or parsed_url.port != 8088:
-                    continue
-            except ValueError:
-                continue
-
-            if parse_qs(parsed_url.query).get('id') == [info_hash]:
-                source_url = candidate
-                break
-
-        if source_url is None:
-            return jsonify({'error': 'El stream no está en la lista M3U solicitada'}), 404
-
-        source = urlsplit(source_url)
-        session_query = parse_qs(source.query)
-        session_query['format'] = ['json']
-        session_query['pid'] = [uuid.uuid4().hex]
-        session_url = urlunsplit((
-            source.scheme,
-            source.netloc,
-            '/ace/manifest.m3u8',
-            urlencode(session_query, doseq=True),
-            '',
-        ))
-
-        try:
-            session_response = requests.get(
-                session_url,
-                headers={'User-Agent': USER_AGENT},
-                timeout=(DEFAULT_TIMEOUT, 10),
-                allow_redirects=False,
-            )
-            session_payload = session_response.json()
-            session_response.close()
-        except (requests.RequestException, ValueError) as error:
-            logger.warning(f"No se pudo iniciar la sesión HLS AceStream {info_hash}: {error}")
-            return jsonify({'error': 'No se pudo iniciar la sesión HLS AceStream'}), 502
-
-        session = session_payload.get('response')
-        playback_url = session.get('playback_url') if isinstance(session, dict) else None
-        try:
-            playback = urlsplit(playback_url)
-            valid_playback_url = (
-                playback.scheme == 'http'
-                and playback.hostname == source.hostname
-                and playback.port == 6878
-                and playback.path.startswith('/ace/m/')
-                and playback.path.endswith('.m3u8')
-            )
-        except (TypeError, ValueError):
-            valid_playback_url = False
-
-        if not valid_playback_url:
-            return jsonify({'error': 'El motor AceStream no devolvió una URL HLS válida'}), 502
-
-        return jsonify({'playback_url': playback_url}), 200
 
     def proxy_acestream(self, info_hash, away=False):
         """Retransmite un stream AceStream desde la M3U cacheada, evitando CORS."""
