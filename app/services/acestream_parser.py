@@ -72,14 +72,14 @@ class AcestreamParser:
                 if href and href.startswith('acestream://'):
                     acestream_links.append({
                         'name': text if text else 'Acestream',
-                        'url': f'http://127.0.0.1:6878/ace/getstream?id={href[12:]}'
+                        'url': f'http://127.0.0.1:8088/ace/getstream?id={href[12:]}'
                     })
             
             # Buscar acestream:// en nodos de texto
             for text_node in soup.find_all(string=re.compile(r'acestream://')):
                 matches = re.findall(r'acestream://[a-f0-9]{40}', text_node)
                 for match in matches:
-                    stream_url = f'http://127.0.0.1:6878/ace/getstream?id={match[12:]}'
+                    stream_url = f'http://127.0.0.1:8088/ace/getstream?id={match[12:]}'
                     if not any(link['url'] == stream_url for link in acestream_links):
                         acestream_links.append({
                             'name': 'Acestream Stream',
