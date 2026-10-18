@@ -663,6 +663,31 @@
                 playerStatus.textContent = '';
             };
 
+            const isAceStream = path.includes('/ace/getstream');
+            if (isAceStream && streamPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                const infoHash = new URL(url, window.location.href).searchParams.get('id');
+                if (!infoHash || !/^[a-f0-9]{40}$/i.test(infoHash)) {
+                    playerStatus.textContent = 'El ID del stream AceStream no es válido.';
+                    return;
+                }
+
+                const hlsPath = streamSource === 'away'
+                    ? `/api/player/acestream/hls/away/${infoHash}`
+                    : `/api/player/acestream/hls/${infoHash}`;
+                try {
+                    const response = await fetch(hlsPath);
+                    const data = await response.json();
+                    if (!response.ok || !data.playback_url) {
+                        throw new Error(data.error || 'No se pudo iniciar la sesión HLS.');
+                    }
+                    streamPlayer.src = data.playback_url;
+                    await streamPlayer.play();
+                } catch (error) {
+                    playerStatus.textContent = `No se pudo iniciar la reproducción HLS: ${error.message}`;
+                }
+                return;
+            }
+
             if (path.endsWith('.m3u8')) {
                 if (streamPlayer.canPlayType('application/vnd.apple.mpegurl')) {
                     streamPlayer.src = url;
